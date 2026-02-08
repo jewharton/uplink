@@ -56,7 +56,8 @@ type Part struct {
 // Metadata interface returns the latest metadata for an object.
 type Metadata interface {
 	Metadata() ([]byte, error)
-	ETag() ([]byte, error)
+	ETag() []byte
+	Checksum() metaclient.ObjectChecksum
 }
 
 // Store is a store for streams. It implements typedStore as part of an ongoing migration
