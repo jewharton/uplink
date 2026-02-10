@@ -18,6 +18,7 @@ import (
 	"storj.io/common/testrand"
 	"storj.io/storj/private/testplanet"
 	"storj.io/uplink"
+	versioned "storj.io/uplink/private/object"
 	"storj.io/uplink/private/testuplink"
 )
 
@@ -285,64 +286,90 @@ func TestUpdateMetadata(t *testing.T) {
 		StorageNodeCount: 0,
 		UplinkCount:      1,
 	}, func(t *testing.T, ctx *testcontext.Context, planet *testplanet.Planet) {
-		project := openProject(t, ctx, planet)
+		sat := planet.Satellites[0]
+		up := planet.Uplinks[0]
+
+		project, err := up.OpenProject(ctx, sat)
+		require.NoError(t, err)
 		defer ctx.Check(project.Close)
 
-		_, err := project.EnsureBucket(ctx, "testbucket")
-		require.NoError(t, err)
-
-		expected := testrand.Bytes(1 * memory.KiB)
-
-		// upload object with no custom metadata
-		upload, err := project.UploadObject(ctx, "testbucket", "obj", nil)
-		require.NoError(t, err)
-		_, err = upload.Write(expected)
-		require.NoError(t, err)
-		require.NoError(t, upload.Commit())
-
-		// check that there is no custom metadata after the upload
-		object, err := project.StatObject(ctx, "testbucket", "obj")
-		require.NoError(t, err)
-		require.Empty(t, object.Custom)
+		objectKey := "obj"
 
 		newMetadata := uplink.CustomMetadata{
 			"key1": "value1",
 			"key2": "value2",
 		}
 
-		// update the object's metadata
-		err = project.UpdateObjectMetadata(ctx, "testbucket", "obj", newMetadata, nil)
-		require.NoError(t, err)
+		t.Run("Basic", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
 
-		// check that the metadata has been updated as expected
-		object, err = project.StatObject(ctx, "testbucket", "obj")
-		require.NoError(t, err)
-		require.Equal(t, newMetadata, object.Custom)
+			expectedContents := testrand.Bytes(1 * memory.KiB)
 
-		// confirm that the object is still downloadable
-		download, err := project.DownloadObject(ctx, "testbucket", "obj", nil)
-		require.NoError(t, err)
-		downloaded, err := io.ReadAll(download)
-		require.NoError(t, err)
-		require.NoError(t, download.Close())
-		require.Equal(t, expected, downloaded)
+			// upload object with no custom metadata
+			upload, err := project.UploadObject(ctx, bucketName, objectKey, nil)
+			require.NoError(t, err)
+			_, err = upload.Write(expectedContents)
+			require.NoError(t, err)
+			require.NoError(t, upload.Commit())
 
-		// remove the object's metadata
-		err = project.UpdateObjectMetadata(ctx, "testbucket", "obj", nil, nil)
-		require.NoError(t, err)
+			// check that there is no custom metadata after the upload
+			object, err := project.StatObject(ctx, bucketName, objectKey)
+			require.NoError(t, err)
+			require.Empty(t, object.Custom)
 
-		// check that the metadata has been removed
-		object, err = project.StatObject(ctx, "testbucket", "obj")
-		require.NoError(t, err)
-		require.Empty(t, object.Custom)
+			// update the object's metadata
+			err = project.UpdateObjectMetadata(ctx, bucketName, objectKey, newMetadata, nil)
+			require.NoError(t, err)
 
-		// confirm that the object is still downloadable
-		download, err = project.DownloadObject(ctx, "testbucket", "obj", nil)
-		require.NoError(t, err)
-		downloaded, err = io.ReadAll(download)
-		require.NoError(t, err)
-		require.NoError(t, download.Close())
-		require.Equal(t, expected, downloaded)
+			// check that the metadata has been updated as expected
+			object, err = project.StatObject(ctx, bucketName, objectKey)
+			require.NoError(t, err)
+			require.Equal(t, newMetadata, object.Custom)
+
+			// confirm that the object is still downloadable
+			download, err := project.DownloadObject(ctx, bucketName, objectKey, nil)
+			require.NoError(t, err)
+			downloaded, err := io.ReadAll(download)
+			require.NoError(t, err)
+			require.NoError(t, download.Close())
+			require.Equal(t, expectedContents, downloaded)
+
+			// remove the object's metadata
+			err = project.UpdateObjectMetadata(ctx, bucketName, objectKey, nil, nil)
+			require.NoError(t, err)
+
+			// check that the metadata has been removed
+			object, err = project.StatObject(ctx, bucketName, objectKey)
+			require.NoError(t, err)
+			require.Empty(t, object.Custom)
+
+			// confirm that the object is still downloadable
+			download, err = project.DownloadObject(ctx, bucketName, objectKey, nil)
+			require.NoError(t, err)
+			downloaded, err = io.ReadAll(download)
+			require.NoError(t, err)
+			require.NoError(t, download.Close())
+			require.Equal(t, expectedContents, downloaded)
+		})
+
+		t.Run("Unsafe update", func(t *testing.T) {
+			// Test the case where the existing metadata contains fields that this method
+			// does not support. In this case, the field is the ETag, which currently can
+			// only be set by the UpdateObjectMetadata method of the private API.
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			upload, err := versioned.UploadObject(ctx, project, bucketName, objectKey, nil)
+			require.NoError(t, err)
+
+			require.NoError(t, upload.SetETag(ctx, []byte("etag")))
+
+			require.NoError(t, upload.Commit())
+
+			err = project.UpdateObjectMetadata(ctx, bucketName, objectKey, newMetadata, nil)
+			require.ErrorIs(t, err, uplink.ErrObjectMetadataUpdateUnsafe)
+		})
 	})
 }
 
