@@ -2748,6 +2748,32 @@ func TestChecksum(t *testing.T) {
 			err = uploadWithChecksum(bucketName, objectKey, checksum)
 			require.ErrorIs(t, err, object.ErrChecksumsUnsupported)
 		})
+
+		t.Run("ListObjects", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			require.NoError(t, uploadWithChecksum(bucketName, objectKey, checksum))
+
+			entries, _, err := object.ListObjects(ctx, project, bucketName, &object.ListObjectsOptions{
+				Checksum: true,
+			})
+			require.NoError(t, err)
+			require.Equal(t, checksum, entries[0].Checksum)
+		})
+
+		t.Run("ListObjectVersions", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			require.NoError(t, uploadWithChecksum(bucketName, objectKey, checksum))
+
+			entries, _, err := object.ListObjectVersions(ctx, project, bucketName, &object.ListObjectVersionsOptions{
+				Checksum: true,
+			})
+			require.NoError(t, err)
+			require.Equal(t, checksum, entries[0].Checksum)
+		})
 	})
 }
 
