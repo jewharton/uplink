@@ -165,6 +165,24 @@ func TestChecksum_Multipart(t *testing.T) {
 			require.ErrorIs(t, err, uplink.ErrObjectNotFound, msgAndArgs...)
 		}
 
+		t.Run("Begin upload", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			_, err := object.BeginUpload(ctx, project, bucketName, objectKey, &object.MultipartUploadOptions{
+				UserData: metaclient.ObjectUserData{
+					Checksum: checksum,
+				},
+			})
+			require.NoError(t, err)
+
+			iter := object.ListUploads(ctx, project, bucketName, &object.ListUploadsOptions{
+				Checksum: true,
+			})
+			require.True(t, iter.Next())
+			require.Equal(t, checksum, iter.Item().Checksum)
+		})
+
 		t.Run("Begin upload - Invalid checksum options", func(t *testing.T) {
 			bucketName := testrand.BucketName()
 			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
