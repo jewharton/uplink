@@ -1140,9 +1140,8 @@ type SegmentListItem struct {
 	PlainSize         int64
 	PlainOffset       int64
 	CreatedAt         time.Time
-	EncryptedETag     []byte
-	EncryptedKeyNonce storj.Nonce
-	EncryptedKey      []byte
+	Encryption        SegmentEncryption
+	EncryptedUserData EncryptedSegmentUserData
 }
 
 // ListSegmentsParams parameters for ListSegments method.
@@ -1193,12 +1192,17 @@ func newListSegmentsResponse(response *pb.SegmentListResponse) ListSegmentsRespo
 				PartNumber: segment.Position.PartNumber,
 				Index:      segment.Position.Index,
 			},
-			PlainSize:         segment.PlainSize,
-			PlainOffset:       segment.PlainOffset,
-			CreatedAt:         segment.CreatedAt,
-			EncryptedETag:     segment.EncryptedETag,
-			EncryptedKeyNonce: segment.EncryptedKeyNonce,
-			EncryptedKey:      segment.EncryptedKey,
+			PlainSize:   segment.PlainSize,
+			PlainOffset: segment.PlainOffset,
+			CreatedAt:   segment.CreatedAt,
+			Encryption: SegmentEncryption{
+				EncryptedKeyNonce: segment.EncryptedKeyNonce,
+				EncryptedKey:      segment.EncryptedKey,
+			},
+			EncryptedUserData: EncryptedSegmentUserData{
+				ETag:     segment.EncryptedETag,
+				Checksum: segment.EncryptedChecksum,
+			},
 		}
 	}
 

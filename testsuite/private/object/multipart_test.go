@@ -132,6 +132,7 @@ func TestChecksum_Multipart(t *testing.T) {
 			IsComposite: true,
 			Value:       []byte("checksum"),
 		}
+		partChecksum := []byte("part checksum")
 
 		project, err := up.OpenProject(ctx, sat)
 		require.NoError(t, err)
@@ -233,6 +234,28 @@ func TestChecksum_Multipart(t *testing.T) {
 			require.ErrorIs(t, err, object.ErrChecksumsUnsupported)
 		})
 
+		t.Run("Upload part", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			upload, err := object.BeginUpload(ctx, project, bucketName, objectKey, nil)
+			require.NoError(t, err)
+
+			part, err := object.UploadPart(ctx, project, bucketName, objectKey, upload.UploadID, 1)
+			require.NoError(t, err)
+
+			_, err = part.Write(testrand.Bytes(32))
+			require.NoError(t, err)
+
+			require.NoError(t, part.SetChecksum(partChecksum))
+
+			require.NoError(t, part.Commit())
+
+			iter := object.ListUploadParts(ctx, project, bucketName, objectKey, upload.UploadID, nil)
+			require.True(t, iter.Next())
+			require.Equal(t, partChecksum, iter.Item().Checksum)
+		})
+
 		t.Run("Commit part - Checksums unsupported", func(t *testing.T) {
 			sat.Metainfo.Endpoint.TestingSetChecksumsEnabled(false)
 			defer sat.Metainfo.Endpoint.TestingSetChecksumsEnabled(true)
@@ -249,8 +272,7 @@ func TestChecksum_Multipart(t *testing.T) {
 			_, err = part.Write(testrand.Bytes(32))
 			require.NoError(t, err)
 
-			checksumValue := []byte("part checksum")
-			require.NoError(t, part.SetChecksum(checksumValue))
+			require.NoError(t, part.SetChecksum(partChecksum))
 
 			require.ErrorIs(t, part.Commit(), object.ErrChecksumsUnsupported)
 		})
