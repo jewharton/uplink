@@ -13,11 +13,14 @@ import (
 	"github.com/zeebo/errs"
 	"go.uber.org/zap"
 
+	"storj.io/common/base58"
+	"storj.io/common/pb"
 	"storj.io/common/storj"
 	"storj.io/common/testcontext"
 	"storj.io/common/testrand"
 	"storj.io/storj/private/testplanet"
 	"storj.io/storj/satellite"
+	"storj.io/storj/satellite/internalpb"
 	"storj.io/uplink"
 	"storj.io/uplink/private/metaclient"
 	"storj.io/uplink/private/object"
@@ -331,6 +334,103 @@ func TestChecksum_Multipart(t *testing.T) {
 				},
 			})
 			require.ErrorIs(t, err, object.ErrChecksumsUnsupported)
+		})
+	})
+}
+
+func TestGetUploadMetadata(t *testing.T) {
+	testplanet.Run(t, testplanet.Config{
+		SatelliteCount: 1, UplinkCount: 1,
+		Reconfigure: testplanet.Reconfigure{
+			Satellite: func(log *zap.Logger, index int, config *satellite.Config) {
+				config.Metainfo.ChecksumsEnabled = true
+			},
+		},
+	}, func(t *testing.T, ctx *testcontext.Context, planet *testplanet.Planet) {
+		sat := planet.Satellites[0]
+		up := planet.Uplinks[0]
+
+		objectKey := "test-object"
+
+		project, err := up.OpenProject(ctx, sat)
+		require.NoError(t, err)
+		defer ctx.Check(project.Close)
+
+		expectedUserData := metaclient.ObjectUserData{
+			Custom: map[string]string{
+				"key": "value",
+			},
+			ETag: []byte("etag"),
+			Checksum: metaclient.ObjectChecksum{
+				Algorithm:   storj.ObjectChecksumAlgorithmCRC32,
+				IsComposite: true,
+				Value:       []byte("checksum"),
+			},
+		}
+
+		t.Run("Success", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			upload, err := object.BeginUpload(ctx, project, bucketName, objectKey, &object.MultipartUploadOptions{
+				UserData: expectedUserData,
+			})
+			require.NoError(t, err)
+
+			userData, err := object.GetUploadMetadata(ctx, project, bucketName, objectKey, upload.UploadID)
+			require.NoError(t, err)
+			require.Equal(t, expectedUserData, userData)
+		})
+
+		t.Run("Missing object", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			upload, err := object.BeginUpload(ctx, project, bucketName, objectKey, &object.MultipartUploadOptions{
+				UserData: expectedUserData,
+			})
+			require.NoError(t, err)
+
+			require.NoError(t, project.AbortUpload(ctx, bucketName, objectKey, upload.UploadID))
+
+			_, err = object.GetUploadMetadata(ctx, project, testrand.BucketName(), objectKey, upload.UploadID)
+			require.ErrorIs(t, err, uplink.ErrObjectNotFound)
+		})
+
+		t.Run("Invalid upload ID", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			upload, err := object.BeginUpload(ctx, project, bucketName, objectKey, &object.MultipartUploadOptions{
+				UserData: expectedUserData,
+			})
+			require.NoError(t, err)
+
+			// Invalid base58 string
+			uploadID := "!@#$%"
+			_, err = object.GetUploadMetadata(ctx, project, bucketName, objectKey, uploadID)
+			require.ErrorIs(t, err, uplink.ErrUploadIDInvalid)
+
+			// Invalid encoded data
+			uploadID = base58.Encode(testrand.Bytes(32))
+			_, err = object.GetUploadMetadata(ctx, project, bucketName, objectKey, uploadID)
+			require.ErrorIs(t, err, uplink.ErrUploadIDInvalid)
+
+			// The satellite returns an "invalid stream ID" error if the stream ID fails
+			// signature verification. Confirm that we properly translate this error.
+			uploadIDBytes, version, err := base58.CheckDecode(upload.UploadID)
+			require.NoError(t, err)
+
+			var internalStreamID internalpb.StreamID
+			require.NoError(t, pb.Unmarshal(uploadIDBytes, &internalStreamID))
+			internalStreamID.SatelliteSignature = testrand.Bytes(32)
+
+			uploadIDBytes, err = pb.Marshal(&internalStreamID)
+			require.NoError(t, err)
+
+			uploadID = base58.CheckEncode(uploadIDBytes, version)
+			_, err = object.GetUploadMetadata(ctx, project, bucketName, objectKey, uploadID)
+			require.ErrorIs(t, err, uplink.ErrUploadIDInvalid)
 		})
 	})
 }
