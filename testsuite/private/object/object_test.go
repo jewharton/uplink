@@ -2849,6 +2849,47 @@ func TestChecksum(t *testing.T) {
 			require.ErrorIs(t, err, object.ErrChecksumsUnsupported)
 		})
 
+		t.Run("CopyObject", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			require.NoError(t, uploadWithChecksum(bucketName, objectKey, checksum))
+
+			copyObjectKey := "test-object-2"
+			copyObj, err := object.CopyObject(ctx, project, bucketName, objectKey, nil, bucketName, copyObjectKey, object.CopyObjectOptions{})
+			require.NoError(t, err)
+			require.Equal(t, checksum, copyObj.Checksum)
+
+			copyObj, err = object.StatObject(ctx, project, bucketName, copyObjectKey, nil)
+			require.NoError(t, err)
+			require.Equal(t, checksum, copyObj.Checksum)
+
+			// The copy should also succeed if the expected checksum algorithm is equal to
+			// the source object's checksum algorithm.
+			copyObjectKey = "test-object-3"
+			copyObj, err = object.CopyObject(ctx, project, bucketName, objectKey, nil, bucketName, copyObjectKey, object.CopyObjectOptions{
+				ExpectedChecksumAlgorithm: checksum.Algorithm,
+			})
+			require.NoError(t, err)
+			require.Equal(t, checksum, copyObj.Checksum)
+
+			copyObj, err = object.StatObject(ctx, project, bucketName, copyObjectKey, nil)
+			require.NoError(t, err)
+			require.Equal(t, checksum, copyObj.Checksum)
+		})
+
+		t.Run("CopyObject - Unexpected checksum algorithm", func(t *testing.T) {
+			bucketName := testrand.BucketName()
+			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
+
+			require.NoError(t, uploadWithChecksum(bucketName, objectKey, checksum))
+
+			_, err := object.CopyObject(ctx, project, bucketName, objectKey, nil, bucketName, "test-object-2", object.CopyObjectOptions{
+				ExpectedChecksumAlgorithm: storj.ObjectChecksumAlgorithmSHA256,
+			})
+			require.ErrorIs(t, err, object.ErrUnexpectedChecksumAlgorithm)
+		})
+
 		t.Run("ListObjects", func(t *testing.T) {
 			bucketName := testrand.BucketName()
 			require.NoError(t, up.CreateBucket(ctx, sat, bucketName))
