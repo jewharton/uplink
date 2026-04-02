@@ -55,9 +55,15 @@ func newCreateBucketResponse(response *pb.BucketCreateResponse) (CreateBucketRes
 	}, nil
 }
 
+var CreateBucketHook func(params CreateBucketParams, err error)
+
 // CreateBucket creates a new bucket.
 func (client *Client) CreateBucket(ctx context.Context, params CreateBucketParams) (respBucket Bucket, err error) {
 	defer mon.Task()(&ctx)(&err)
+
+	if CreateBucketHook != nil {
+		defer func() { CreateBucketHook(params, err) }()
+	}
 
 	var response *pb.BucketCreateResponse
 	err = WithRetry(ctx, func(ctx context.Context) error {

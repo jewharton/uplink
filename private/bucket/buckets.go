@@ -223,8 +223,10 @@ type CreateBucketWithObjectLockParams struct {
 	Placement         string
 }
 
+var CreateBucketWithObjectLock = createBucketWithObjectLock
+
 // CreateBucketWithObjectLock creates a new bucket with object lock enabled/disabled.
-func CreateBucketWithObjectLock(ctx context.Context, project *uplink.Project, params CreateBucketWithObjectLockParams) (_ *Bucket, err error) {
+func createBucketWithObjectLock(ctx context.Context, project *uplink.Project, params CreateBucketWithObjectLockParams) (_ *Bucket, err error) {
 	defer mon.Task()(&ctx)(&err)
 
 	if params.Name == "" {
